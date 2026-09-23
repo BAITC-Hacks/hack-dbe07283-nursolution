@@ -1,20 +1,26 @@
 """HTTP-контракт API: реальные matcher/CSV, без сети и расходов OpenAI."""
 import asyncio
+from contextlib import ExitStack
 from concurrent.futures import ThreadPoolExecutor
 from threading import Event
-from unittest import TestCase, main
+from unittest import main
 from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 
 from api import create_app
 from smart_matcher import DEFAULT_CSV, EventMatcher
+from tests.support import IsolatedAPITestCase
 
 
-class APITests(TestCase):
+class APITests(IsolatedAPITestCase):
     def setUp(self):
+        super().setUp()
         self.matcher = EventMatcher(use_llm=False)
-        self.client = self.enterContext(TestClient(create_app(matcher=self.matcher)))
+        self.addCleanup(self.matcher.close)
+        stack = ExitStack()
+        self.addCleanup(stack.close)
+        self.client = stack.enter_context(TestClient(create_app(matcher=self.matcher)))
         self.query = dict(city="Алматы", date="2026-09-26", event_type="корпоратив",
                           category="Ведущий", budget=2000000)
 
@@ -101,7 +107,7 @@ class APITests(TestCase):
 
     def test_health_and_openapi(self):
         response = self.client.get("/health")
-        self.assertEqual(response.json(), {"status": "ok", "total_profiles": 66})
+        self.assertEqual(response.json(), {"status": "ok", "total_profiles": 66, "catalog_backend": "csv", "llm_enabled": False})
         self.assertEqual(self.client.get("/docs").status_code, 200)
         schema = self.client.get("/openapi.json").json()
         self.assertIn("MatchRequest", schema["components"]["schemas"])
@@ -113,8 +119,12 @@ class APITests(TestCase):
     def test_frontend_and_assets_are_served(self):
         page = self.client.get("/")
         self.assertEqual(page.status_code, 200)
-        self.assertIn('id="order-form"', page.text)
-        for asset in ("styles.css", "app.js", "favicon.svg"):
+        self.assertNotIn('id="order-form"', page.text)
+        self.assertIn('href="/selection"', page.text)
+        selection = self.client.get("/selection")
+        self.assertEqual(selection.status_code, 200)
+        self.assertIn('id="order-form"', selection.text)
+        for asset in ("styles.css", "app.js", "home.js", "about.js", "cards.js", "ui.js", "favicon.svg"):
             response = self.client.get(f"/assets/{asset}")
             self.assertEqual(response.status_code, 200)
             self.assertTrue(response.content)
@@ -173,7 +183,7 @@ class APITests(TestCase):
                 self.assertEqual(future.result(timeout=2).status_code, 200)
 
 
-class LifecycleTests(TestCase):
+class LifecycleTests(IsolatedAPITestCase):
     def test_load_once_and_close_on_shutdown(self):
         with patch("app.api.application.EventMatcher", wraps=EventMatcher) as factory:
             application = create_app(csv_path=DEFAULT_CSV, use_llm=False)

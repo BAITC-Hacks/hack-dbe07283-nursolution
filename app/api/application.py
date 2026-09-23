@@ -13,6 +13,8 @@ from app.config import DEFAULT_CSV, ROOT
 from app.services.matcher import EventMatcher
 from app.api.deadline import RequestClockMiddleware
 from app.api.errors import install_error_handlers
+from app.repositories.source import configured_catalog
+from app.api.admin import router as admin_router
 
 
 DEFAULT_ORIGINS = "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"
@@ -36,8 +38,10 @@ def create_app(*, csv_path: str | Path | None = None, use_llm: bool | None = Non
         instance = matcher if matcher is not None else EventMatcher(
             csv_path if csv_path is not None else os.getenv("MATCHER_CSV_PATH") or DEFAULT_CSV,
             use_llm=enabled,
+            repository=configured_catalog(csv_path if csv_path is not None else os.getenv("MATCHER_CSV_PATH") or DEFAULT_CSV),
         )
         application.state.matcher = instance
+        application.state.admin_token = os.getenv("ADMIN_TOKEN", "")
         try:
             yield
         finally:
@@ -59,10 +63,13 @@ def create_app(*, csv_path: str | Path | None = None, use_llm: bool | None = Non
     application.add_middleware(RequestClockMiddleware)
 
     install_error_handlers(application)
+    application.include_router(admin_router)
 
     @application.get("/health", response_model=HealthResponse, summary="Проверить готовность каталога")
     def health(request: Request):
-        return {"status": "ok", "total_profiles": len(request.app.state.matcher.contractors)}
+        return {"status": "ok", "total_profiles": len(request.app.state.matcher.contractors),
+                "catalog_backend": request.app.state.matcher.repository.backend,
+                "llm_enabled": request.app.state.matcher.use_llm}
 
     @application.get("/catalog", summary="Варианты для формы подбора")
     def catalog(request: Request) -> dict[str, object]:
@@ -86,12 +93,24 @@ def create_app(*, csv_path: str | Path | None = None, use_llm: bool | None = Non
             deadline=request.state.request_started + instance.settings.request_timeout,
             **payload.model_dump())
 
+    @application.get('/metrics', summary='Агрегаты текущего процесса')
+    def metrics(request: Request):
+        return request.app.state.matcher.explanations.metrics.snapshot()
+
+    @application.get('/admin', include_in_schema=False)
+    def admin():
+        return FileResponse(ROOT / 'frontend' / 'admin.html')
+
     frontend = ROOT / "frontend"
     application.mount("/assets", StaticFiles(directory=frontend), name="assets")
 
     @application.get("/", include_in_schema=False)
     def index():
         return FileResponse(frontend / "index.html")
+
+    @application.get("/selection", include_in_schema=False)
+    def selection():
+        return FileResponse(frontend / "selection.html")
 
     return application
 

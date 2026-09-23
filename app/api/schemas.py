@@ -38,6 +38,18 @@ class Evidence(BaseModel):
     quote: str
 
 
+class MatchFacts(BaseModel):
+    """Факты прошедшего фильтрацию профиля; доступность требует подтверждения."""
+    event_type: str
+    budget: float = Field(ge=0, allow_inf_nan=False)
+    budget_difference: float = Field(ge=0, allow_inf_nan=False)
+    date: str
+    date_status: Literal["not_marked_busy"]
+    language: str | None
+    duration: float | None = Field(gt=0, allow_inf_nan=False)
+    max_hours: float | None = Field(gt=0, allow_inf_nan=False)
+
+
 class ContractorCard(BaseModel):
     id: str
     anon_name: str
@@ -48,6 +60,7 @@ class ContractorCard(BaseModel):
     explanation: str
     explanation_source: Literal["python", "openai"]
     evidence: Evidence | None
+    match_facts: MatchFacts
 
 
 class RejectionCounts(BaseModel):
@@ -100,3 +113,5 @@ class ErrorResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     total_profiles: Count
+    catalog_backend: Literal['csv', 'postgres']
+    llm_enabled: bool

@@ -128,6 +128,9 @@ class ExplanationTests(unittest.TestCase):
         self.assertEqual(result["A"]["explanation_source"], "python")
         self.assertIn("Время", warning)
         pending = next(iter(self.service._inflight.values()))
+        # Windows timed waits may wake just before the monotonic deadline.
+        # Release only after it, so this actually tests a late provider result.
+        Event().wait(max(0, started + 0.08 - monotonic()) + 0.02)
         release.set()
         pending.result(timeout=2)
         self.client.chat.completions.create.side_effect = valid_response

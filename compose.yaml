@@ -13,6 +13,9 @@ services:
       EXPLANATION_CACHE_MAX_ENTRIES: "${EXPLANATION_CACHE_MAX_ENTRIES:-256}"
       LLM_MAX_CONCURRENCY: "${LLM_MAX_CONCURRENCY:-4}"
       CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}"
+      CATALOG_BACKEND: "${CATALOG_BACKEND:-csv}"
+      DATABASE_URL: "${DOCKER_DATABASE_URL:-postgresql://nur:${POSTGRES_PASSWORD:-nur_local_dev}@db:5432/nur}"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:-}"
     init: true
     restart: unless-stopped
     read_only: true
@@ -36,7 +39,30 @@ services:
     environment:
       MATCHER_USE_LLM: "false"
       OPENAI_API_KEY: ""
+      CATALOG_BACKEND: "csv"
+      ADMIN_TOKEN: ""
     init: true
     read_only: true
     tmpfs:
       - /tmp
+
+  db:
+    image: postgres:16-alpine
+    profiles: [postgres]
+    environment:
+      POSTGRES_DB: nur
+      POSTGRES_USER: nur
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-nur_local_dev}"
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U nur -d nur"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

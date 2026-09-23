@@ -16,6 +16,7 @@ from threading import Lock, Thread
 from time import monotonic
 
 from app.config import Settings
+from app.observability import Metrics
 from app.services.cache import ExplanationCache
 from app.services.evidence import evidence_options, render_explanation
 from app.services.prompts import MODEL, PROMPT_VERSION, SYSTEM_PROMPT
@@ -27,6 +28,7 @@ TIMEOUT_WARNING = "Время ожидания объяснений истекл
 class ExplanationService:
     def __init__(self, *, client=None, settings: Settings):
         self.settings = settings
+        self.metrics = Metrics()
         self.client = client
         self._owns_client = False
         self._client_lock = Lock()
@@ -58,10 +60,13 @@ class ExplanationService:
         options = {p.id: evidence_options(p, selected) for p in selected}
         fallback = self._fallback(selected, request, options)
         if not use_llm:
+            self.metrics.increment("offline")
             return fallback, None, (fallback, "Офлайн-режим: объяснения собраны на Python.")
         if self.client is None and not os.getenv("OPENAI_API_KEY"):
+            self.metrics.increment("missing_key")
             return fallback, None, (fallback, "OPENAI_API_KEY не задан: объяснения собраны на Python.")
         if monotonic() >= deadline:
+            self.metrics.increment("deadline_before_lookup")
             return fallback, None, (fallback, TIMEOUT_WARNING)
         key = self._key(selected, request)
         with self._lock:
@@ -69,10 +74,14 @@ class ExplanationService:
                 return fallback, None, (fallback, "Сервис объяснений завершает работу; показаны факты Python.")
             cached = self.cache.get(key)
             if cached is not None:
+                self.metrics.increment("cache_hit")
                 return fallback, None, (cached, None)
+            self.metrics.increment("cache_miss")
             if key in self._inflight:
+                self.metrics.increment("shared_wait")
                 return fallback, self._inflight[key], None
             if len(self._inflight) >= self.settings.llm_concurrency:
+                self.metrics.increment("saturated")
                 return fallback, None, (fallback, "Сервис объяснений занят; показаны проверенные факты Python.")
             future = Future()
             self._inflight[key] = future
@@ -97,10 +106,18 @@ class ExplanationService:
             if remaining <= 0:
                 result = fallback, TIMEOUT_WARNING
             else:
-                result = generate(client, selected, request, options, fallback, timeout=min(7.0, remaining))
+                self.metrics.increment("provider_calls")
+                started = monotonic()
+                try:
+                    result = generate(client, selected, request, options, fallback, timeout=min(7.0, remaining))
+                    self.metrics.increment("provider_success" if result[1] is None else "provider_invalid")
+                finally:
+                    self.metrics.observe("provider", monotonic() - started)
         except Exception as exc:
+            self.metrics.increment("provider_errors")
             result = fallback, f"LLM недоступна или ответ некорректен ({type(exc).__name__}); объяснения собраны на Python."
         if monotonic() >= deadline:
+            self.metrics.increment("late_result")
             result = fallback, TIMEOUT_WARNING
         with self._lock:
             if result[1] is None and not self._closed:
@@ -119,6 +136,7 @@ class ExplanationService:
         try:
             return deepcopy(future.result(timeout=max(0, deadline - monotonic())))
         except FutureTimeout:
+            self.metrics.increment("wait_timeout")
             return fallback, TIMEOUT_WARNING
 
     async def aexplain(self, selected, request, deadline, use_llm=True):
@@ -130,6 +148,7 @@ class ExplanationService:
             return deepcopy(await asyncio.wait_for(
                 asyncio.shield(asyncio.wrap_future(future)), timeout=max(0, deadline - monotonic())))
         except asyncio.TimeoutError:
+            self.metrics.increment("wait_timeout")
             return fallback, TIMEOUT_WARNING
 
     def close(self):

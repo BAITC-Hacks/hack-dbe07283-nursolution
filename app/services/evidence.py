@@ -25,11 +25,10 @@ def evidence_options(profile: Contractor, peers: list[Contractor]) -> list[str]:
 
 def render_explanation(profile: Contractor, request: dict, quote: str | None) -> str:
     """Свободные утверждения модели не попадают в карточку: только цитата и факты."""
-    facts = (f"Цена от {money(profile.price_from_kzt)} ₸ при бюджете {money(request['budget'])} ₸; "
-             f"формат «{request['event_type']}» указан, дата {request['date']} не отмечена занятой")
-    if request["language"]:
-        facts += f"; язык «{request['language']}» указан"
-    if request["duration"] is not None:
-        facts += f"; лимит {profile.max_hours:g} ч при запросе {request['duration']:g} ч"
-    return (f"В описании указано: «{quote.rstrip('.;')}». " if quote else "") + facts + "."
+    # Краткий текст для CLI и клиентов прежнего контракта. Подробные условия
+    # теперь передаются отдельно в match_facts, без повторения всей анкеты.
+    price = f"Стоимость от {money(profile.price_from_kzt)} ₸ — в пределах вашего бюджета."
+    if quote:
+        return f"По данным профиля: «{quote.rstrip('.;')}». {price}"
+    return f"Работает в формате «{request['event_type']}». {price}"
 

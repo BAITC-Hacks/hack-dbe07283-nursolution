@@ -1,5 +1,7 @@
 /* Framework-free UI. All profile/API content is rendered as text, never HTML. */
-"use strict";
+import {element, numberFormat, plural, niceDate, capitalized} from "./ui.js";
+import {renderCard} from "./cards.js";
+import "./about.js";
 
 const form = document.querySelector("#order-form");
 const results = document.querySelector("#results");
@@ -9,30 +11,11 @@ const note = document.querySelector("#results-note");
 const submit = document.querySelector("#submit-button");
 const submitLabel = document.querySelector("#submit-label");
 const statusLive = document.querySelector("#status-live");
-const numberFormat = new Intl.NumberFormat("ru-RU");
-const dateFormat = new Intl.DateTimeFormat("ru-RU", { day: "numeric", month: "long" });
+const initialState = document.querySelector("#selection-start");
 let catalogReady = false;
 let lastQuery = null;
 let activeRequest = null;
 let requestVersion = 0;
-
-function element(tag, className, text) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-function plural(n, one, few, many) {
-  const v = n % 100;
-  return v >= 11 && v <= 14 ? many : n % 10 === 1 ? one : n % 10 >= 2 && n % 10 <= 4 ? few : many;
-}
-
-function niceDate(value) {
-  return dateFormat.format(new Date(`${value}T12:00:00`));
-}
-
-function capitalized(value) { return value.charAt(0).toUpperCase() + value.slice(1); }
 
 function setBusy(busy) {
   panel.setAttribute("aria-busy", String(busy));
@@ -88,10 +71,14 @@ function readQuery() {
 }
 
 function renderLoading(query) {
-  results.replaceChildren(); note.hidden = true;
+  panel.hidden = false;
+  panel.removeAttribute("data-stale");
+  initialState.hidden = true;
+  results.replaceChildren(); note.replaceChildren(); note.hidden = true;
   context.classList.remove("pending-banner");
   context.textContent = query ? `${query.city} · ${niceDate(query.date)} · Проверяем условия` : "Загружаем каталог";
   document.querySelector("#results-count").textContent = "…";
+  document.querySelector("#results-title").textContent = "Ищем совпадения";
   for (let i = 0; i < 3; i++) {
     const card = element("div", "loading-card");
     card.setAttribute("aria-hidden", "true");
@@ -101,27 +88,17 @@ function renderLoading(query) {
   statusLive.textContent = "Подбираем подрядчиков по вашим условиям.";
 }
 
-function renderCard(card, index, query) {
-  const article = element("article", "contractor-card");
-  const top = element("div", "card-top");
-  const identity = element("div", "card-identity");
-  identity.append(element("h3", "", card.anon_name), element("p", "card-meta", `${card.category} · ${card.city}`));
-  const price = element("div", "card-price");
-  price.append(element("small", "", "от "), document.createTextNode(`${numberFormat.format(card.price_from_kzt)} ₸`), element("small", "price-unit", "за мероприятие"));
-  top.append(element("span", "card-number", String(index + 1).padStart(2, "0")), identity, price);
-  const explanation = element("div", "explanation-block");
-  const label = element("p", "why-label");
-  label.innerHTML = '<svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m3 8 3 3 7-7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-  label.append(document.createTextNode("Почему в подборке"));
-  explanation.append(label, element("p", "explanation", card.explanation));
-  article.append(top, explanation);
-  return article;
-}
-
-function rejectionText(result) {
-  const labels = {budget: "выше бюджета", date: "заняты на эту дату", event_type: "не работают в выбранном формате",
-    language: "не указан нужный язык", duration: "не подходят по длительности", duration_unknown: "длительность не указана"};
-  return Object.entries(labels).filter(([key]) => result.rejection_counts[key]).map(([key, label]) => `${result.rejection_counts[key]} — ${label}`).join("; ");
+function rejectionList(result) {
+  const labels = {budget: "выше бюджета", date: "заняты на эту дату", event_type: "другой формат",
+    language: "нет нужного языка", duration: "не подходят по длительности", duration_unknown: "длительность неизвестна"};
+  const list = element("dl", "rejection-list");
+  for (const [key, label] of Object.entries(labels)) {
+    if (!result.rejection_counts[key]) continue;
+    const item = element("div", "rejection-item");
+    item.append(element("dt", "", label), element("dd", "", String(result.rejection_counts[key])));
+    list.append(item);
+  }
+  return list;
 }
 
 function suggestionLabel(suggestion) {
@@ -140,28 +117,38 @@ function populateForm(query) {
 }
 
 function renderResponse(result, query) {
-  results.replaceChildren(); note.hidden = true;
+  panel.removeAttribute("data-stale");
+  results.replaceChildren(); note.replaceChildren(); note.hidden = true;
   context.classList.remove("pending-banner");
   context.textContent = `${query.city} · ${niceDate(query.date)} · ${capitalized(query.event_type)}`;
   const count = result.cards.length;
-  document.querySelector("#results-count").textContent = `${count} ${plural(count, "совпадение", "совпадения", "совпадений")}`;
+  document.querySelector("#results-title").textContent = count ? "Ваша подборка" : "Результат поиска";
+  document.querySelector("#results-count").textContent = `${count} ${plural(count, "вариант", "варианта", "вариантов")}`;
   if (result.status === "matched") {
-    result.cards.forEach((card, index) => results.append(renderCard(card, index, query)));
-    const notes = [];
-    if (count < 3) notes.push(`Подош${count === 1 ? "ёл только один подрядчик" : "ли только два подрядчика"}. ${rejectionText(result) ? `Остальные: ${rejectionText(result)}.` : "Это все профили в выбранной категории и городе."}`);
-    notes.push("Указаны цены «от». Итоговую стоимость и свободную дату уточните у подрядчика.");
-    note.textContent = notes.join(" "); note.hidden = false;
+    result.cards.forEach((card, index) => results.append(renderCard(card, index)));
+    if (count < 3) {
+      const detail = element("details", "selection-note");
+      const summary = element("summary", "", `Почему ${count === 1 ? "только один вариант" : "только два варианта"}?`);
+      summary.append(element("span", "details-sign", "+"));
+      detail.append(summary, element("p", "", `В этом городе и категории — ${result.scope_count} ${plural(result.scope_count, "профиль", "профиля", "профилей")}.`));
+      const rejections = rejectionList(result);
+      if (rejections.children.length) detail.append(rejections, element("p", "", "Для каждого профиля показана первая причина отказа."));
+      else detail.append(element("p", "", "Все профили в выбранном городе и категории соответствуют условиям."));
+      note.append(detail);
+    }
+    note.append(element("p", "booking-note", "Цена — ориентир, дата — по каталогу. Перед бронированием подтвердите детали с подрядчиком."));
+    note.hidden = false;
     statusLive.textContent = `Подборка готова. Найдено: ${count}.`;
     return;
   }
   const empty = element("div", "empty-state");
-  empty.append(element("div", "empty-mark", "0 /"));
+  empty.append(element("div", "empty-mark", "Не совпало"));
   if (result.status === "no_category_in_city") {
     empty.append(element("h3", "", "Пока нет в каталоге"), element("p", "", `В городе ${query.city} пока нет подрядчиков категории «${query.category}». Выберите другую категорию или город.`));
     const change = element("button", "retry-button", "Изменить категорию ↗"); change.type = "button";
     change.addEventListener("click", () => form.elements.category.focus()); empty.append(change);
   } else {
-    empty.append(element("h3", "", "Немного изменим условия?"), element("p", "", `В городе ${query.city} есть профили в категории «${query.category}»: ${result.scope_count}. По всем условиям пока никто не подходит.`), element("p", "", `${capitalized(rejectionText(result))}.`));
+    empty.append(element("h3", "", "Пока без точного совпадения"), element("p", "", `В городе ${query.city} есть профили в категории «${query.category}»: ${result.scope_count}. По всем условиям пока никто не подходит.`), rejectionList(result));
     if (result.suggestions.length) {
       const suggestions = element("div", "suggestions");
       result.suggestions.forEach(suggestion => {
@@ -178,12 +165,16 @@ function renderResponse(result, query) {
 }
 
 function renderError(message, retry) {
-  results.replaceChildren(); note.hidden = true;
+  panel.hidden = false;
+  panel.removeAttribute("data-stale");
+  initialState.hidden = true;
+  results.replaceChildren(); note.replaceChildren(); note.hidden = true;
   const empty = element("div", "empty-state");
   empty.append(element("div", "empty-mark", "—"), element("h3", "", "Не удалось получить подборку"), element("p", "", message));
   const button = element("button", "retry-button", "Попробовать ещё раз ↗"); button.type = "button";
   button.addEventListener("click", retry); empty.append(button); results.append(empty);
   context.textContent = "Ваши параметры сохранены в форме";
+  document.querySelector("#results-title").textContent = "Результат поиска";
   document.querySelector("#results-count").textContent = "—";
   statusLive.textContent = message;
 }
@@ -193,7 +184,7 @@ async function runMatch(scroll = false) {
   activeRequest?.abort(); const controller = new AbortController(); activeRequest = controller;
   const version = ++requestVersion;
   setBusy(true); renderLoading(query);
-  if (scroll && window.matchMedia("(max-width: 760px)").matches) panel.scrollIntoView({behavior: "smooth", block: "start"});
+  if (scroll) panel.scrollIntoView({behavior: "auto", block: "start"});
   const timeout = setTimeout(() => controller.abort("timeout"), 12000);
   try {
     const response = await fetch("/match", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(query), signal: controller.signal});
@@ -226,15 +217,21 @@ function updatePresets() {
 
 function changed() {
   clearErrors(); updatePresets();
-  if (activeRequest) { ++requestVersion; activeRequest.abort(); activeRequest = null; setBusy(false); results.replaceChildren(); }
-  if (lastQuery || catalogReady) {
+  if (activeRequest) {
+    ++requestVersion; activeRequest.abort(); activeRequest = null; setBusy(false);
+    results.replaceChildren(); panel.hidden = true; initialState.hidden = false;
+    lastQuery = null;
+  }
+  if (lastQuery) {
     context.textContent = "Условия изменены — обновите подборку"; context.classList.add("pending-banner");
+    panel.setAttribute("data-stale", "true");
     results.querySelectorAll(".suggestion-button").forEach(button => { button.disabled = true; });
   }
 }
 
 async function initialize() {
-  setBusy(true); renderLoading(null);
+  setBusy(true);
+  submitLabel.textContent = "Загружаем каталог…";
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10000);
   try {
@@ -250,7 +247,11 @@ async function initialize() {
       select.disabled = false;
     }
     document.querySelector("#catalog-meta").textContent = `${catalog.total_profiles} ${plural(catalog.total_profiles, "профиль", "профиля", "профилей")} в каталоге · Казахстан`;
-    catalogReady = true; setBusy(false); await runMatch();
+    const requestedCategory = new URLSearchParams(window.location.search).get("category");
+    if (catalog.categories.includes(requestedCategory)) form.elements.category.value = requestedCategory;
+    catalogReady = true; setBusy(false);
+    panel.hidden = true; initialState.hidden = false;
+    statusLive.textContent = "Каталог готов. Укажите условия и запустите подбор.";
   } catch {
     renderError("Не удалось загрузить каталог. Проверьте, что сервис доступен, и попробуйте снова.", initialize);
     setBusy(false);
@@ -267,8 +268,4 @@ form.elements.budget.addEventListener("blur", () => {
 document.querySelectorAll("[data-budget]").forEach(button => button.addEventListener("click", () => {
   form.elements.budget.value = numberFormat.format(Number(button.dataset.budget)); changed();
 }));
-const dialog = document.querySelector("#about-dialog");
-document.querySelector("#about-open").addEventListener("click", () => dialog.showModal());
-document.querySelector("#about-close").addEventListener("click", () => dialog.close());
-dialog.addEventListener("click", event => { if (event.target === dialog) { const bounds = dialog.getBoundingClientRect(); if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) dialog.close(); } });
 initialize();

@@ -16,8 +16,16 @@
 !data/hackathon dataset anonymized .csv
 !frontend/
 !frontend/index.html
+!frontend/selection.html
+!frontend/home.js
+!frontend/about.js
 !frontend/styles.css
 !frontend/app.js
+!frontend/cards.js
+!frontend/ui.js
+!frontend/admin.html
+!frontend/admin.js
+!frontend/admin.css
 !frontend/favicon.svg
 **/__pycache__/
 **/*.pyc

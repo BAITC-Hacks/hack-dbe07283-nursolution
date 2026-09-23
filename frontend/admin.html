@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Nur — редактор каталога</title>
+  <link rel="stylesheet" href="/assets/styles.css"><link rel="stylesheet" href="/assets/admin.css">
+  <script type="module" src="/assets/admin.js"></script>
+</head>
+<body>
+<div class="page-shell">
+  <header class="site-header"><a class="brand" href="/">nur<span class="brand-point">.</span></a><span class="brand-caption">РЕДАКТОР КАТАЛОГА</span><nav class="header-nav" aria-label="Основная навигация"><a class="nav-link" href="/">Главная</a><a class="nav-link" href="/selection">К подбору ↗</a></nav></header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">ДАННЫЕ ПОДРЯДЧИКОВ</p><h1>Редактор <span>каталога.</span></h1></div></section>
+    <p id="admin-status" role="status" aria-live="polite"></p>
+    <form id="admin-login" class="form-panel login-panel">
+      <h2>Доступ к редактированию</h2><p>Введите ADMIN_TOKEN из серверного .env. Это отдельный ключ редактора, не ключ OpenAI.</p>
+      <div class="field"><label for="admin-token">Ключ редактора</label><input id="admin-token" type="password" autocomplete="off" required></div>
+      <button class="submit-button" type="submit">Открыть каталог ↗</button>
+    </form>
+    <section id="admin-workspace" hidden>
+      <div class="admin-toolbar"><span id="backend-label"></span><button id="admin-reload" type="button" class="retry-button">Перечитать каталог</button><button id="admin-logout" type="button" class="text-button">Выйти</button></div>
+      <p id="catalog-mode-note" class="catalog-mode-note" hidden>Открыт CSV: профили можно только просматривать. Чтобы добавлять и изменять подрядчиков, запустите сервис с каталогом PostgreSQL.</p>
+      <div class="workspace admin-grid">
+        <aside class="form-panel"><h2>Профили</h2><div class="field"><label for="profile-select">Выберите подрядчика</label><select id="profile-select"></select></div><button id="profile-new" class="submit-button" type="button">Добавить профиль +</button><p class="source-note">После сохранения изменения сразу учитываются в новых запросах подбора.</p></aside>
+        <form id="profile-form" class="form-panel editor-panel">
+          <h2 id="editor-title">Профиль подрядчика</h2>
+          <fieldset id="profile-fields">
+            <div class="field-row"><div class="field"><label for="profile-id">ID</label><input id="profile-id" name="id" pattern="[A-Za-z0-9_-]{1,80}" required></div><div class="field"><label for="profile-name">Имя</label><input id="profile-name" name="anon_name" maxlength="200" required></div></div>
+            <div class="field-row"><div class="field"><label for="profile-city">Город</label><input id="profile-city" name="city" maxlength="200" required></div><div class="field"><label for="profile-price">Цена от, ₸</label><input id="profile-price" name="price_from_kzt" type="number" min="0" step="1" required></div></div>
+            <div class="field"><label for="profile-categories">Категории — через |</label><input id="profile-categories" name="categories" required placeholder="Ведущий|Музыкант"></div>
+            <div class="field"><label for="profile-formats">Форматы — через |</label><input id="profile-formats" name="event_formats" required placeholder="свадьба|корпоратив"></div>
+            <div class="field-row"><div class="field"><label for="profile-languages">Языки — через |</label><input id="profile-languages" name="languages" required></div><div class="field"><label for="profile-hours">Максимум часов</label><input id="profile-hours" name="max_hours" type="number" min="0.1" step="any" placeholder="Неизвестно"></div></div>
+            <div class="field"><label for="profile-dates">Занятые даты — YYYY-MM-DD через |</label><input id="profile-dates" name="busy_dates" placeholder="2026-09-26|2026-09-27"></div>
+            <div class="field"><label for="profile-description">Описание</label><textarea id="profile-description" name="description" rows="6" maxlength="10000"></textarea></div>
+            <button id="profile-save" class="submit-button" type="submit">Сохранить изменения ↗</button>
+          </fieldset>
+        </form>
+      </div>
+    </section>
+  </main>
+</div>
+</body></html>

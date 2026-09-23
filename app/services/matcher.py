@@ -1,5 +1,6 @@
 """Правила фильтрации, советы и детерминированное ранжирование."""
 from __future__ import annotations
+import asyncio
 from datetime import date as Date, timedelta
 from pathlib import Path
 from time import monotonic
@@ -7,18 +8,23 @@ from typing import Any
 from app.config import DEFAULT_CSV, Settings
 from app.domain.models import Contractor
 from app.domain.validation import normalized, contains, number, iso_date, money
-from app.repositories.catalog import load_catalog
+from app.repositories.source import CsvCatalog, Catalog
 from app.services.explanations import ExplanationService
+from app.services.cards import build_card
 
 REASONS = ("city", "category", "budget", "date", "event_type", "language", "duration", "duration_unknown")
 
 class EventMatcher:
     def __init__(self, csv_path: str | Path = DEFAULT_CSV, *, client: Any = None,
-                 use_llm: bool = True, settings: Settings | None = None):
-        self.contractors = load_catalog(csv_path)
+                 use_llm: bool = True, settings: Settings | None = None, repository: Catalog | None = None):
+        self.repository = repository if repository is not None else CsvCatalog(csv_path)
         self.settings = settings or Settings.from_env()
         self.explanations = ExplanationService(client=client, settings=self.settings)
         self.use_llm = use_llm
+
+    @property
+    def contractors(self):
+        return self.repository.load()
 
     def close(self):
         self.explanations.close()
@@ -35,7 +41,7 @@ class EventMatcher:
     async def amatch(self, *, deadline=None, **query):
         """Асинхронное ожидание LLM без занятия HTTP thread pool."""
         deadline = min(deadline if deadline is not None else float("inf"), monotonic() + self.settings.request_timeout)
-        result, selected, request = self._prepare(**query)
+        result, selected, request = await asyncio.to_thread(self._prepare, **query)
         if not selected:
             return result
         explanations, warning = await self.explanations.aexplain(selected, request, deadline, self.use_llm)
@@ -46,10 +52,7 @@ class EventMatcher:
         summary = result.pop("_summary", "")
         # Этап 4: модель не может менять состав и порядок карточек.
         for profile in selected:
-            result["cards"].append(dict(
-                id=profile.id, anon_name=profile.anon_name, category=request["category"],
-                categories=list(profile.categories), city=profile.city,
-                price_from_kzt=profile.price_from_kzt, **explanations[profile.id]))
+            result["cards"].append(build_card(profile, request, explanations[profile.id]))
         result["message"] = f"Подобрали: {len(selected)}; всего проходят условия: {result['eligible_count']}."
         if len(selected) < 3:
             result["message"] += (f" Меньше трёх: число профилей в городе в этой категории — {result['scope_count']}. "
@@ -83,7 +86,8 @@ class EventMatcher:
         # Этап 1: только Python; один профиль — одна причина отказа.
         candidates, scoped, over_budget = [], [], []
         counts = dict.fromkeys(REASONS, 0)
-        for profile in self.contractors:
+        profiles = self.contractors
+        for profile in profiles:
             if normalized(profile.city) != normalized(city):
                 counts["city"] += 1
                 continue
@@ -100,7 +104,7 @@ class EventMatcher:
             else:
                 candidates.append(profile)
 
-        result = dict(status="matched", cards=[], message="", total_profiles=len(self.contractors),
+        result = dict(status="matched", cards=[], message="", total_profiles=len(profiles),
                       scope_count=len(scoped), eligible_count=len(candidates), rejection_counts=counts,
                       suggestions=[])
         summary = self._rejection_summary(counts, over_budget)

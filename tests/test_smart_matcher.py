@@ -76,6 +76,36 @@ class MatcherTests(unittest.TestCase):
         self.assertEqual(matcher.match(**{**self.query, "language": None}, duration=6)["status"], "matched")
         self.assertEqual(matcher.match(**self.query)["status"], "no_matches")
 
+    def test_card_facts_preserve_budget_and_requested_conditions(self):
+        matcher = self.matcher([self.row()], use_llm=False)
+        self.addCleanup(matcher.close)
+        card = matcher.match(**{**self.query, "language": " русский "}, duration=4)["cards"][0]
+        facts = card["match_facts"]
+        self.assertEqual(facts["budget_difference"], 100000)
+        self.assertEqual(facts["budget"], self.query["budget"])
+        self.assertEqual(facts["date"], self.query["date"])
+        self.assertEqual(facts["date_status"], "not_marked_busy")
+        self.assertEqual(facts["language"], "русский")
+        self.assertEqual((facts["duration"], facts["max_hours"]), (4, 6))
+        self.assertIn(card["evidence"]["quote"].rstrip("."), card["explanation"])
+
+    def test_card_facts_do_not_invent_optional_conditions(self):
+        matcher = self.matcher([self.row(max_hours="", description="")], use_llm=False)
+        self.addCleanup(matcher.close)
+        card = matcher.match(**{**self.query, "language": None})["cards"][0]
+        self.assertIsNone(card["match_facts"]["language"])
+        self.assertIsNone(card["match_facts"]["duration"])
+        self.assertIsNone(card["match_facts"]["max_hours"])
+        self.assertIsNone(card["evidence"])
+        self.assertIn("свадьба", card["explanation"])
+
+    def test_card_facts_allow_zero_budget_without_division(self):
+        matcher = self.matcher([self.row(price_from_kzt=0)], use_llm=False)
+        self.addCleanup(matcher.close)
+        card = matcher.match(**{**self.query, "budget": 0})["cards"][0]
+        self.assertEqual(card["match_facts"]["budget_difference"], 0)
+        self.assertEqual(card["match_facts"]["budget"], 0)
+
     def test_invalid_requests(self):
         matcher = self.matcher([self.row()], use_llm=False)
         for changes in ({"budget": -1}, {"budget": float("nan")}, {"budget": float("inf")},

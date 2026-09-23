@@ -1,0 +1,42 @@
+services:
+  web:
+    build:
+      context: .
+      target: runtime
+    ports:
+      - "127.0.0.1:${APP_PORT:-8080}:8000"
+    environment:
+      MATCHER_USE_LLM: "${MATCHER_USE_LLM:-false}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      MATCHER_TIMEOUT_SECONDS: "${MATCHER_TIMEOUT_SECONDS:-8}"
+      EXPLANATION_CACHE_TTL_SECONDS: "${EXPLANATION_CACHE_TTL_SECONDS:-600}"
+      EXPLANATION_CACHE_MAX_ENTRIES: "${EXPLANATION_CACHE_MAX_ENTRIES:-256}"
+      LLM_MAX_CONCURRENCY: "${LLM_MAX_CONCURRENCY:-4}"
+      CORS_ORIGINS: "${CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  tests:
+    profiles: [test]
+    build:
+      context: .
+      target: test
+    environment:
+      MATCHER_USE_LLM: "false"
+      OPENAI_API_KEY: ""
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp

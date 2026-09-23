@@ -1,0 +1,23 @@
+# Only these inputs are needed to build the app and its optional test target.
+# In particular .env, .git, .venv, IDE files and local secrets stay on the host.
+*
+!Dockerfile
+!.dockerignore
+!requirements.txt
+!requirements-dev.txt
+!api.py
+!schemas.py
+!smart_matcher.py
+!app/
+!app/**
+!tests/
+!tests/**
+!data/
+!data/hackathon dataset anonymized .csv
+!frontend/
+!frontend/index.html
+!frontend/styles.css
+!frontend/app.js
+!frontend/favicon.svg
+**/__pycache__/
+**/*.pyc
